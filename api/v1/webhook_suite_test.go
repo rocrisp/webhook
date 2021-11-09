@@ -18,6 +18,9 @@ package v1
 
 import (
 	"context"
+	"crypto/tls"
+	"fmt"
+	"net"
 	"path/filepath"
 	"testing"
 	"time"
@@ -27,9 +30,11 @@ import (
 
 	admissionv1beta1 "k8s.io/api/admission/v1beta1"
 	//+kubebuilder:scaffold:imports
-	appsv1 "k8s.io/api/apps/v1"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	//appsv1 "k8s.io/api/apps/v1"
+	//corev1 "k8s.io/api/core/v1"
+	//apierrors "k8s.io/apimachinery/pkg/api/errors"
+	//metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -38,7 +43,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest/printer"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // These tests use Ginkgo (BDD-style Go testing framework). Refer to
@@ -63,6 +67,7 @@ var _ = BeforeSuite(func() {
 
 	ctx, cancel = context.WithCancel(context.TODO())
 
+	//envtest cluster is configured to read CRDs from the CRD directory Kubebuilder scaffolds for you.
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
@@ -72,6 +77,7 @@ var _ = BeforeSuite(func() {
 		},
 	}
 
+	// Start the envtest cluster
 	cfg, err := testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
@@ -85,11 +91,12 @@ var _ = BeforeSuite(func() {
 
 	//+kubebuilder:scaffold:scheme
 
+	//a client is created for our test CRUD operarations.
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	// start webhook server using Manager
+	// start controller using Manager
 	webhookInstallOptions := &testEnv.WebhookInstallOptions
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:             scheme,
@@ -101,71 +108,52 @@ var _ = BeforeSuite(func() {
 	})
 	Expect(err).NotTo(HaveOccurred())
 
-	Expect(len(webhookInstallOptions.MutatingWebhooks)).To(Equal(2))
-    Expect(len(webhookInstallOptions.ValidatingWebhooks)).To(Equal(2))
-
 	err = (&Memcached{}).SetupWebhookWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
+
+	Expect(len(webhookInstallOptions.MutatingWebhooks)).To(Equal(1))
+	Expect(len(webhookInstallOptions.ValidatingWebhooks)).To(Equal(1))
 
 	//+kubebuilder:scaffold:webhook
 
 	go func() {
 		defer GinkgoRecover()
 		err = mgr.Start(ctx)
-		if err != nil {
-			Expect(err).NotTo(HaveOccurred())
-		}
+		Expect(err).NotTo(HaveOccurred())
 	}()
 
-	//Make the changes here
-	obj := &appsv1.Deployment{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "apps/v1",
-			Kind:       "Deployment",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-deployment",
-			Namespace: "default",
-		},
-		Spec: appsv1.DeploymentSpec{
-			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{"foo": "bar"},
-			},
-			Template: corev1.PodTemplateSpec{
-				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"foo": "bar"}},
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:  "nginx",
-							Image: "nginx",
-						},
-					},
-				},
-			},
-		},
-	}
-
+	
 	// wait for the webhook server to get ready
-	//dialer := &net.Dialer{Timeout: time.Second}
-	//addrPort := fmt.Sprintf("%s:%d", webhookInstallOptions.LocalServingHost, webhookInstallOptions.LocalServingPort)
-	Eventually(func() bool {
-		// 	conn, err := tls.DialWithDialer(dialer, "tcp", addrPort, &tls.Config{InsecureSkipVerify: true})
-		// 	if err != nil {
-		// 		return err
-		// 	}
-		// 	conn.Close()
-		// 	return nil
-		// }).Should(Succeed())
-		err = k8sClient.Create(context.TODO(), obj)
-		return apierrors.ReasonForError(err) == metav1.StatusReason("Always denied")
-	}, 1*time.Second).Should(BeTrue())
+	dialer := &net.Dialer{Timeout: time.Second}
+	addrPort := fmt.Sprintf("%s:%d", webhookInstallOptions.LocalServingHost, webhookInstallOptions.LocalServingPort)
+	Eventually(func() error {
+		conn, err := tls.DialWithDialer(dialer, "tcp", addrPort, &tls.Config{InsecureSkipVerify: true})
+		if err != nil {
+			return err
+		}
+		conn.Close()
+		return nil
+	}).Should(Succeed())
 
 }, 60)
-
 
 var _ = AfterSuite(func() {
 	cancel()
 	By("tearing down the test environment")
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
+})
+
+var _ = Describe("Run webhook tests: ", func() {
+	It("Validate webhook", func() {
+		By("create a cr", func() {
+
+		})
+		By("calling Initialize", func() {
+
+		})
+		By("calling Validate webhook", func() {
+
+		})
+	})
 })
